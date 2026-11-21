@@ -42,7 +42,7 @@ def stage(path: Path, ratios_are_percent: bool = True) -> pd.DataFrame:
     df.columns = [c.strip() for c in df.columns]
     df = df.rename(columns=RENAME)
     df["Company"] = df["Company"].astype(str).str.strip().str.upper()
-    df["Category"] = df["Category"].astype(str).str.strip()
+    df["Category"] = df["Category"].astype(str).str.strip().str.upper()
     num_cols = [c for c in df.columns if c not in ("Company", "Category")]
     for c in num_cols:
         df[c] = pd.to_numeric(df[c], errors="coerce")
@@ -50,6 +50,11 @@ def stage(path: Path, ratios_are_percent: bool = True) -> pd.DataFrame:
         for c in PCT_COLS:
             if c in df:
                 df[c] = df[c] / 100
+    # data-quality rules (mirror of stg_Financials)
+    placeholder = df["EBITDA"].abs().le(1) & df["Revenue"].gt(1000)
+    df.loc[placeholder, "EBITDA"] = np.nan
+    df.loc[df["Category"].eq("BANK"), "CurrentRatio"] = np.nan
+    df = df.drop(columns=["FCFPerShare"], errors="ignore")
     df = df.dropna(subset=["Company", "Year"]).drop_duplicates(["Company", "Year"])
     df["Year"] = df["Year"].astype(int)
     return df
@@ -61,13 +66,13 @@ def shape(stg: pd.DataFrame) -> pd.DataFrame:
     d["CostOfRevenue"] = d["Revenue"] - d["GrossProfit"]
     d["OperatingExpenses"] = d["GrossProfit"] - d["EBITDA"]
     d["BelowEBITDA"] = d["EBITDA"] - d["NetIncome"]
+    d["UnallocatedCosts"] = np.where(d["EBITDA"].isna(), d["GrossProfit"] - d["NetIncome"], np.nan)
     d["SharesOutstanding"] = np.where(d["EPS"].fillna(0) != 0, d["NetIncome"] / d["EPS"], np.nan)
-    d["TotalDebtEst"] = d["DebtToEquity"] * d["ShareholderEquity"]
+    d["TotalDebt"] = d["DebtToEquity"] * d["ShareholderEquity"]
     assets = np.where(d["ROA"].abs() >= 0.0005, d["NetIncome"] / d["ROA"], np.nan)
-    d["TotalAssetsEst"] = np.where(assets > 0, assets, np.nan)
-    d["OtherLiabilitiesEst"] = d["TotalAssetsEst"] - d["ShareholderEquity"] - d["TotalDebtEst"]
+    d["TotalAssets"] = np.where(assets > 0, assets, np.nan)
+    d["OtherLiabilities"] = d["TotalAssets"] - d["ShareholderEquity"] - d["TotalDebt"]
     d["NetCashFlow"] = d[["CFO", "CFI", "CFF"]].sum(axis=1, min_count=1)
-    d["FreeCashFlowEst"] = d["FCFPerShare"] * d["SharesOutstanding"]
     return d
 
 
@@ -76,7 +81,7 @@ def by_year(d: pd.DataFrame) -> pd.DataFrame:
     g = d.groupby("Year").agg(
         Revenue=("Revenue", "sum"), GrossProfit=("GrossProfit", "sum"),
         OperatingIncome=("EBITDA", "sum"), NetIncome=("NetIncome", "sum"),
-        CurrentRatio=("CurrentRatio", "mean"), Debt=("TotalDebtEst", "sum"),
+        CurrentRatio=("CurrentRatio", "mean"), Debt=("TotalDebt", "sum"),
         Equity=("ShareholderEquity", "sum"),
     )
     g["GrossMarginPct"] = g["GrossProfit"] / g["Revenue"]
@@ -95,8 +100,8 @@ def by_year(d: pd.DataFrame) -> pd.DataFrame:
 
 def by_company_year(d: pd.DataFrame) -> pd.DataFrame:
     cols = ["Company", "Category", "Year", "Revenue", "GrossProfit", "EBITDA", "NetIncome",
-            "ShareholderEquity", "TotalDebtEst", "TotalAssetsEst", "OtherLiabilitiesEst",
-            "CurrentRatio", "DebtToEquity", "CFO", "CFI", "CFF", "FreeCashFlowEst"]
+            "ShareholderEquity", "TotalDebt", "TotalAssets", "OtherLiabilities",
+            "CurrentRatio", "DebtToEquity", "CFO", "CFI", "CFF"]
     out = d[cols].sort_values(["Company", "Year"]).copy()
     out["GrossMarginPct"] = out["GrossProfit"] / out["Revenue"]
     out["NetMarginPct"] = out["NetIncome"] / out["Revenue"]
@@ -107,13 +112,18 @@ def by_company_year(d: pd.DataFrame) -> pd.DataFrame:
 def checks(d: pd.DataFrame) -> list[str]:
     """Data-quality checks finance would want before the numbers go to leadership."""
     msgs = []
-    bridge = d["Revenue"] - d["CostOfRevenue"] - d["OperatingExpenses"] - d["BelowEBITDA"] - d["NetIncome"]
+    parts = d[["CostOfRevenue", "OperatingExpenses", "BelowEBITDA", "UnallocatedCosts"]].sum(axis=1, min_count=1)
+    bridge = d["Revenue"] - parts - d["NetIncome"]
     msgs.append(f"P&L bridge ties to Net Income: {np.allclose(bridge.dropna(), 0, atol=1e-6)}")
     msgs.append(f"Rows: {len(d)} | companies: {d['Company'].nunique()} | years: {d['Year'].min()}-{d['Year'].max()}")
     neg_gp = d[d["GrossProfit"] > d["Revenue"]]
     msgs.append(f"Rows with Gross Profit > Revenue: {len(neg_gp)}")
-    msgs.append(f"Rows with no asset estimate (ROA~0 or sign mismatch): {d['TotalAssetsEst'].isna().sum()}")
+    msgs.append(f"Rows with no derived total assets (ROA~0 or sign mismatch): {d['TotalAssets'].isna().sum()}")
     msgs.append(f"Missing Market Cap: {d['MarketCapB'].isna().sum()}")
+    msgs.append(f"EBITDA placeholders blanked: {d['EBITDA'].isna().sum()} | current ratio blanked (banks): {d['CurrentRatio'].isna().sum()}")
+    counts = d.groupby("Year")["Company"].nunique()
+    full = counts[counts >= 0.8 * counts.max()].index.max()
+    msgs.append(f"Companies per year: {counts.to_dict()} -> latest full year = {full}")
     return msgs
 
 

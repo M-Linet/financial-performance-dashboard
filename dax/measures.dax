@@ -24,6 +24,8 @@ DEFINE
     // Source has no operating-income line; EBITDA is the operating-income measure.
     MEASURE '_Measures'[Operating Income (EBITDA)] = SUM ( FactIncomeStatement[EBITDA] )
     MEASURE '_Measures'[D&A, Interest & Tax] = SUM ( FactIncomeStatement[BelowEBITDA] )
+    // Only populated where EBITDA is missing (Barclays): Gross Profit - Net Income
+    MEASURE '_Measures'[Costs below Gross Profit (not split)] = SUM ( FactIncomeStatement[UnallocatedCosts] )
     MEASURE '_Measures'[Net Income] = SUM ( FactIncomeStatement[NetIncome] )
     MEASURE '_Measures'[Waterfall Amount] = SUM ( FactPLWaterfall[Amount] )
     MEASURE '_Measures'[Employees] = SUM ( FactIncomeStatement[Employees] )                   // fmt: #,0
@@ -48,7 +50,9 @@ DEFINE
         RETURN
             IF ( NOT ISBLANK ( _PY ), [Revenue] - _PY )
 
-    // Simple YoY: total vs total. Distorted when a company enters/exits the set.
+    // Simple YoY: total vs total. Distorted when a company enters/exits the set
+    // (in the real file: PayPal joins in 2014, Sears leaves after 2018, and
+    // FY2023 has only MSFT + NVDA, so simple FY2023 YoY shows -85% vs +6% like-for-like).
     MEASURE '_Measures'[Revenue YoY %] = DIVIDE ( [Revenue YoY Δ], [Revenue PY] )             // fmt: +0.0%;-0.0%;0.0%
 
     // Like-for-like YoY: only companies reporting revenue in BOTH years.
@@ -101,18 +105,20 @@ DEFINE
             IF ( _N > 0 && _RevFirst > 0 && _RevLast > 0, ( _RevLast / _RevFirst ) ^ ( 1 / _N ) - 1 )
 
     // ---------- 4. Balance sheet (semi-additive: year-end balances) ----------
+    // Debt and assets are derived from published D/E and ROA in Power Query
+    // (AAPL FY2022 ties to the 10-K: assets $352.8B, debt $120.1B).
     // LASTNONBLANKVALUE picks the latest year in context, so totals across
     // years show the closing balance instead of an invalid sum.
     MEASURE '_Measures'[Shareholder Equity] =
         LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[ShareholderEquity] ) )
-    MEASURE '_Measures'[Total Debt (est.)] =
-        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[TotalDebtEst] ) )
-    MEASURE '_Measures'[Total Assets (est.)] =
-        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[TotalAssetsEst] ) )
-    MEASURE '_Measures'[Other Liabilities (est.)] =
-        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[OtherLiabilitiesEst] ) )
-    MEASURE '_Measures'[Total Liabilities (est.)] =
-        [Total Assets (est.)] - [Shareholder Equity]
+    MEASURE '_Measures'[Total Debt] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[TotalDebt] ) )
+    MEASURE '_Measures'[Total Assets] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[TotalAssets] ) )
+    MEASURE '_Measures'[Other Liabilities] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[OtherLiabilities] ) )
+    MEASURE '_Measures'[Total Liabilities] =
+        [Total Assets] - [Shareholder Equity]
     MEASURE '_Measures'[Market Cap ($B)] =
         LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[MarketCapB] ) )             // fmt: $#,0.0"B"
 
@@ -128,19 +134,18 @@ DEFINE
             SWITCH ( TRUE (), ISBLANK ( _CR ), BLANK (), _CR < 1, "Below 1.0x", _CR < 1.5, "1.0–1.5x", "Healthy (≥1.5x)" )
 
     // Weighted D/E = total debt / total equity (not an average of ratios)
-    MEASURE '_Measures'[Debt to Equity] = DIVIDE ( [Total Debt (est.)], [Shareholder Equity] ) // fmt: 0.00"x"
+    MEASURE '_Measures'[Debt to Equity] = DIVIDE ( [Total Debt], [Shareholder Equity] ) // fmt: 0.00"x"
 
     MEASURE '_Measures'[Net Income (closing year)] =
         LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactIncomeStatement[NetIncome] ) )
     MEASURE '_Measures'[ROE %] = DIVIDE ( [Net Income (closing year)], [Shareholder Equity] )  // fmt: 0.0%
-    MEASURE '_Measures'[ROA % (est.)] = DIVIDE ( [Net Income (closing year)], [Total Assets (est.)] )
+    MEASURE '_Measures'[ROA %] = DIVIDE ( [Net Income (closing year)], [Total Assets] )
 
     // ---------- 6. Cash flow --------------------------------------------------
     MEASURE '_Measures'[Operating Cash Flow] = SUM ( FactCashFlow[CFO] )
     MEASURE '_Measures'[Investing Cash Flow] = SUM ( FactCashFlow[CFI] )
     MEASURE '_Measures'[Financing Cash Flow] = SUM ( FactCashFlow[CFF] )
     MEASURE '_Measures'[Net Cash Flow] = SUM ( FactCashFlow[NetCashFlow] )
-    MEASURE '_Measures'[Free Cash Flow (est.)] = SUM ( FactCashFlow[FreeCashFlowEst] )
     MEASURE '_Measures'[Cash Conversion] = DIVIDE ( [Operating Cash Flow], [Net Income] )      // fmt: 0.00"x"
 
     // ---------- 7. Report helpers (titles, labels, formatting) ---------------
@@ -149,7 +154,7 @@ DEFINE
             IF (
                 HASONEVALUE ( DimCompany[Company Name] ),
                 VALUES ( DimCompany[Company Name] ),
-                IF ( HASONEVALUE ( DimCompany[Category] ), VALUES ( DimCompany[Category] ) & " companies", "All companies" )
+                IF ( HASONEVALUE ( DimCompany[Sector] ), VALUES ( DimCompany[Sector] ) & " companies", "All companies" )
             )
         RETURN
             _Co & " · FY" & [Selected Year]

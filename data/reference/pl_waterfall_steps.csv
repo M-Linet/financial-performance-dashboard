@@ -1,0 +1,5 @@
+StepOrder,LineItem,SourceColumn,Sign
+1,Revenue,Revenue,1
+2,Cost of Revenue,CostOfRevenue,-1
+3,Operating Expenses,OperatingExpenses,-1
+4,"D&A, Interest & Tax",BelowEBITDA,-1

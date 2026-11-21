@@ -1,0 +1,19 @@
+Ticker,CompanyName,Sector,Country
+AAPL,Apple,Technology,United States
+MSFT,Microsoft,Technology,United States
+GOOG,Alphabet (Google),Technology,United States
+NVDA,NVIDIA,Semiconductors,United States
+INTC,Intel,Semiconductors,United States
+AMZN,Amazon,E-commerce & Logistics,United States
+PYPL,PayPal,FinTech,United States
+AIG,American International Group,Insurance,United States
+BCS,Barclays,Banking,United Kingdom
+MCD,McDonald's,Food & Restaurants,United States
+PCG,PG&E,Utilities,United States
+SHLD,Sears Holdings,Retail,United States
+NWTC,Northwind Tech (synthetic),Technology,Sample
+CRST,Crestpay (synthetic),FinTech,Sample
+HRBR,Harbor Bank (synthetic),Banking,Sample
+BLDR,Bluedoor Foods (synthetic),Food & Restaurants,Sample
+VLTA,Volta Grid (synthetic),Utilities,Sample
+PKLG,Parcelink (synthetic),E-commerce & Logistics,Sample

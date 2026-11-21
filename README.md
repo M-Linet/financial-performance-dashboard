@@ -33,7 +33,7 @@ A Power BI model that takes the raw financial statements file, shapes it automat
 |---|---|---|
 | 1 | **P&L Overview** | KPI cards (Revenue, Gross Margin, Operating Income, Net Income, like-for-like growth) and a **waterfall** bridging Revenue → Net Income |
 | 2 | **Trends** | **Combo chart** of revenue & operating income (columns) vs net margin (line); simple vs like-for-like YoY growth; cash flow by activity; gross-margin small multiples |
-| 3 | **Balance Sheet & Ratios** | Matrix by Category → Company with equity, debt, assets, **current ratio** (RAG-colored), D/E, ROE; leverage-vs-return scatter |
+| 3 | **Balance Sheet & Ratios** | Matrix by Sector → Company with equity, debt, assets, **current ratio** (RAG-colored), D/E, ROE; leverage-vs-return scatter |
 | ↳ | **Company Detail** *(drill-through)* | Full statement view (line items × years), company waterfall, liquidity trend |
 
 <!-- Add screenshots after building: docs/screenshots/01-pl-overview.png etc. -->
@@ -61,7 +61,7 @@ erDiagram
     DimCompany {
         text Company PK
         text CompanyName
-        text Category
+        text Sector
         text Sector
         text Country
     }
@@ -93,8 +93,8 @@ erDiagram
         text Company
         int Year
         number ShareholderEquity
-        number TotalDebtEst
-        number TotalAssetsEst
+        number TotalDebt
+        number TotalAssets
         number CurrentRatio
         number DebtToEquity
     }
@@ -104,11 +104,11 @@ erDiagram
         number CFO
         number CFI
         number CFF
-        number FreeCashFlowEst
+        number NetCashFlow
     }
 ```
 
-**Power Query pipeline:** three source files (raw statements CSV + `company_master.csv` + `pl_waterfall_steps.csv`) → one staging query (header fixes, typing, % rescaling, de-dup) → two dimensions and four fact tables. All file paths come from parameters, so moving the project or swapping in a new period is a one-field change.
+**Power Query pipeline:** three source files (raw statements CSV + `company_master.csv` + `pl_waterfall_steps.csv`) → one staging query (header fixes, typing, % rescaling, de-dup, and the data-quality rules below) → two dimensions and four fact tables. All file paths come from parameters, so moving the project or swapping in a new period is a one-field change.
 
 ---
 
@@ -139,6 +139,29 @@ RETURN DIVIDE ( _Cur - _Prev, _Prev )
 ```
 
 ---
+
+## Key insights (FY2009–FY2022, 12 companies, USD)
+
+1. **Amazon grew fastest but earned the least.** Revenue compounded at **26% a year**, from $24.5B to $514B, and was 31% of the group's FY2022 revenue. Yet FY2022 ended in a **$2.7B net loss** (−0.5% margin). The waterfall shows where: EBITDA was still **+$54B**, and the loss comes entirely from the D&A, interest & tax step (−$56.9B).
+2. **Intel had the sharpest reversal.** In FY2022 revenue fell **20%**, net income fell **60%**, and gross margin dropped from 55.4% to **42.6%** (−12.8 pp), its lowest in the dataset.
+3. **Microsoft and NVIDIA lead on profitability.** Both posted net margins of about **36–37%** in FY2022. Microsoft's net margin rose from 24.9% in FY2009.
+4. **McDonald's is very profitable on negative equity.** It earned a 26.6% net margin in FY2022 with **negative shareholder equity every year since FY2016** (−$6.0B in FY2022), so its ROE and D/E are not comparable to peers. The model flags rather than averages them.
+5. **PG&E and Sears show distress in the numbers.** PG&E lost **$6.9B and $7.7B** in FY2018–19 before returning to a $1.8B profit in FY2022, and had the lowest FY2022 current ratio (0.81x). Sears' revenue shrank about **11% a year** with seven straight loss years (FY2012–18) before it drops out of the data.
+6. **The comparable set matters.** Simple FY2023 revenue growth reads **−85%** because only two companies have reported. Like-for-like growth is **+6%**. That's why the dashboard defaults to FY2022 and shows both growth measures.
+
+## Data-quality issues handled
+
+Profiling the real file turned up issues a manual Excel process would silently carry into the board pack:
+
+| Issue | Fix |
+|---|---|
+| `Bank` vs `BANK`; PG&E labelled *Manufacturing*, Sears *Finance* | Upper-case categories; group by a curated `Sector` from `company_master.csv` |
+| Barclays EBITDA is a placeholder `1` in every year | Blanked; the waterfall uses an *unallocated costs* step so it still ties to net income |
+| Banks report current ratio = 1.0 every year | Blanked for banks/insurers |
+| "Free Cash Flow per Share" doesn't reconcile to filings | Dropped |
+| FY2023 has 2 of 12 companies | `Is Latest Full Year` flag; like-for-like growth measure |
+
+`scripts/reconcile.py` re-checks all of this and confirms the P&L bridge ties to net income for every company-year.
 
 ## Repo structure
 
@@ -175,8 +198,8 @@ RETURN DIVIDE ( _Cur - _Prev, _Prev )
 
 The dataset is **annual, company-level** and publishes ratios rather than full balance sheets. So:
 - **EBITDA** is used as operating income (named that way so it isn't confused with EBIT).
-- **Total debt and total assets are estimated** from published D/E and ROA, and are labeled *(est.)* everywhere.
-- Drill-through goes **Category → Company → statement lines**. The model is ready for a `DimDepartment` if department-level data is available.
+- **Total debt and total assets are derived** by reversing the published D/E and ROA. This reproduces Apple's FY2022 10-K exactly (assets $352.8B, debt $120.1B).
+- Drill-through goes **Sector → Company → statement lines**. The model is ready for a `DimDepartment` if department-level data is available.
 
 Details: [`docs/data-dictionary.md`](docs/data-dictionary.md).
 

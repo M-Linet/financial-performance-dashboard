@@ -34,8 +34,8 @@ Optional: Python 3.10+ with pandas for `scripts/reconcile.py`.
    | `DimYear` | ✅ | Fiscal years + US inflation |
    | `FactIncomeStatement` | ✅ | P&L lines incl. derived COGS / OpEx |
    | `FactPLWaterfall` | ✅ | Long P&L bridge driven by `pl_waterfall_steps.csv` |
-   | `FactBalanceSheet` | ✅ | Equity, est. debt/assets, liquidity ratios |
-   | `FactCashFlow` | ✅ | CFO / CFI / CFF, est. free cash flow |
+   | `FactBalanceSheet` | ✅ | Equity, derived debt/assets, liquidity ratios |
+   | `FactCashFlow` | ✅ | CFO / CFI / CFF, net cash flow |
 
 4. Put the queries in groups (right-click → *Move to group*): **Parameters**, **Staging**, **Dimensions**, **Facts**. It keeps the editor tidy.
 5. **Close & Apply**.
@@ -59,7 +59,7 @@ Then:
 - `FactPLWaterfall[LineItem]` → **Column tools → Sort by column → `StepOrder`**. Hide `StepOrder`.
 - `DimYear[Fiscal Year]` → Sort by column → `Year`.
 - `DimYear[Year]` → Summarization: *Don't summarize*.
-- Hierarchy on `DimCompany`: **Category → Company Name** (right-click Category → *Create hierarchy*). This is the drill path.
+- Hierarchy on `DimCompany`: **Sector → Company Name** (right-click Sector → *Create hierarchy*). This is the drill path. Use `Sector` (from `company_master.csv`) rather than the raw `Category`, which mislabels some companies (PG&E as Manufacturing, Sears as Finance).
 
 The result is a star schema with two shared dimensions and four facts at company-year grain.
 
@@ -96,7 +96,7 @@ Canvas: 1280 × 720 (16:9) on every page.
 
 ## 5. Page 1: P&L Overview
 
-**Slicers (top band):** `DimYear[Fiscal Year]` (dropdown, **single select**), `DimCompany[Category]`, `DimCompany[Company Name]` (dropdown, multi-select).
+**Slicers (top band):** `DimYear[Fiscal Year]` (dropdown, **single select**, set to **FY2022**, the latest full year, before saving; FY2023 only has Microsoft and NVIDIA), `DimCompany[Sector]`, `DimCompany[Company Name]` (dropdown, multi-select).
 
 **KPI row: 5 cards** (new card visual; use *reference labels* for the comparison line):
 
@@ -115,7 +115,7 @@ Canvas: 1280 × 720 (16:9) on every page.
 - Title: *fx* → field value `[Title P&L Bridge]`
 - Data labels on, display units: None (values are already $M)
 
-Reading it: Revenue (green) → minus Cost of Revenue → minus Operating Expenses → minus D&A, interest & tax → **Net Income** total bar.
+Reading it: Revenue (green) → minus Cost of Revenue → minus Operating Expenses → minus D&A, interest & tax → **Net Income** total bar. For Barclays (no EBITDA in the source) the two middle steps are replaced by a single *Costs below Gross Profit (not split)* step, so the bridge still ends at net income.
 
 **Supporting visual (right side):** clustered bar *Net Margin % by Company Name*, sorted descending. Clicking a bar cross-filters the waterfall.
 
@@ -123,7 +123,7 @@ Reading it: Revenue (green) → minus Cost of Revenue → minus Operating Expens
 
 ## 6. Page 2: Trends
 
-No year slicer on this page (trends need all years). Keep the Category / Company slicers and **sync** them with Page 1 (View → Sync slicers).
+No year slicer on this page (trends need all years). Keep the Sector / Company slicers and **sync** them with Page 1 (View → Sync slicers).
 
 1. **Line and clustered column chart** (the combo chart)
    - X-axis: `DimYear[Year]` (type: categorical)
@@ -142,8 +142,8 @@ No year slicer on this page (trends need all years). Keep the Category / Company
 **Slicer:** `DimYear[Fiscal Year]` single select (sync with Page 1).
 
 **Matrix (main visual):**
-- Rows: the `DimCompany` hierarchy **Category → Company Name** (turn on +/- icons, start collapsed at Category)
-- Values: `[Shareholder Equity]`, `[Total Debt (est.)]`, `[Total Assets (est.)]`, `[Current Ratio]`, `[Debt to Equity]`, `[ROE %]`, `[Market Cap ($B)]`
+- Rows: the `DimCompany` hierarchy **Sector → Company Name** (turn on +/- icons, start collapsed at Sector)
+- Values: `[Shareholder Equity]`, `[Total Debt]`, `[Total Assets]`, `[Current Ratio]`, `[Debt to Equity]`, `[ROE %]`, `[Market Cap ($B)]`
 - Conditional formatting:
   - `Current Ratio` → Background color → *Field value* → `[CF Current Ratio Colour]` (red < 1.0x, amber < 1.5x, green ≥ 1.5x)
   - `Debt to Equity` → Data bars
@@ -152,8 +152,8 @@ No year slicer on this page (trends need all years). Keep the Category / Company
 
 **Supporting visuals:**
 - Scatter chart: X = `[Debt to Equity]`, Y = `[ROE %]`, Values/Details = `Company Name`, Size = `[Market Cap ($B)]`. A quick leverage-vs-return view.
-- Stacked bar: `[Shareholder Equity]`, `[Total Debt (est.)]`, `[Other Liabilities (est.)]` by Company Name. This is the funding structure, and it adds up to estimated total assets.
-- Text box footnote: *“Debt and total assets are estimated from published D/E and ROA ratios.”*
+- Stacked bar: `[Shareholder Equity]`, `[Total Debt]`, `[Other Liabilities]` by Company Name. This is the funding structure, and it adds up to total assets.
+- Text box footnote: *“Debt and total assets are derived from published D/E and ROA. Current ratio not shown for banks/insurers.”*
 
 ---
 
@@ -163,13 +163,13 @@ No year slicer on this page (trends need all years). Keep the Category / Company
 2. Power BI adds a **Back** button automatically.
 3. Build:
    - Header card: `[Selection Label]`
-   - **Matrix "statement view"**: Columns = `DimYear[Year]`; Values = `[Revenue]`, `[Cost of Revenue]`, `[Gross Profit]`, `[Operating Expenses]`, `[Operating Income (EBITDA)]`, `[D&A, Interest & Tax]`, `[Net Income]`, `[Shareholder Equity]`, `[Total Debt (est.)]`, `[Total Assets (est.)]`, `[Operating Cash Flow]`, `[Free Cash Flow (est.)]`. Turn on **Format → Values → Options → Switch values to rows**. That gives a classic financial statement layout, line items down and years across.
+   - **Matrix "statement view"**: Columns = `DimYear[Year]`; Values = `[Revenue]`, `[Cost of Revenue]`, `[Gross Profit]`, `[Operating Expenses]`, `[Operating Income (EBITDA)]`, `[D&A, Interest & Tax]`, `[Costs below Gross Profit (not split)]`, `[Net Income]`, `[Shareholder Equity]`, `[Total Debt]`, `[Total Assets]`, `[Operating Cash Flow]`, `[Net Cash Flow]`. Turn on **Format → Values → Options → Switch values to rows**. That gives a classic financial statement layout, line items down and years across.
    - Mini waterfall (same fields as Page 1) for the company
    - Line: `[Current Ratio]` and `[Debt to Equity]` by Year
 4. **Hide the page** (right-click tab → Hide). Users only reach it by right-clicking a company in the Page 3 matrix (or any visual) → **Drill through → Company Detail**.
 5. Add a small text hint on Page 3: *“Right-click a company → Drill through for its full statements.”*
 
-> The Kaggle dataset is at company level, so the drill path is **Category → Company → statement line items × year**. If your real data has departments or cost centers, add a `DimDepartment` table and put it on the drill-through page the same way; the measures don't change.
+> The Kaggle dataset is at company level, so the drill path is **Sector → Company → statement line items × year**. If your real data has departments or cost centers, add a `DimDepartment` table and put it on the drill-through page the same way; the measures don't change.
 
 ---
 

@@ -1,0 +1,17 @@
+# Raw Kaggle download (download it yourself, see data/README.md)
+data/raw/*
+!data/raw/.gitkeep
+
+# Script outputs
+scripts/output/
+
+# Power BI project local caches
+**/.pbi/localSettings.json
+**/.pbi/cache.abf
+*.pbix.bak
+
+# Python / OS
+__pycache__/
+.venv/
+.DS_Store
+Thumbs.db

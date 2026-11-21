@@ -1,7 +1,8 @@
 // Query name: stg_Financials
 // Staging query — right-click > uncheck "Enable load".
-// Reads the raw CSV, fixes header quirks, types every column and
-// rescales percentage columns. Every fact table references this query.
+// Reads the raw CSV, fixes header quirks, types every column, rescales
+// percentage columns and applies the data-quality rules below.
+// Every other query references this one.
 let
     Source = Csv.Document(
         File.Contents(DataFolder & RawFile),
@@ -38,7 +39,8 @@ let
         Renamed,
         {
             {"Company", each Text.Upper(Text.Trim(_)), type text},
-            {"Category", each Text.Trim(_), type text}
+            // Source mixes "Bank" and "BANK" — upper-case so they group together
+            {"Category", each Text.Upper(Text.Trim(_)), type text}
         }
     ),
 
@@ -63,8 +65,32 @@ let
         else
             YearAsInt,
 
+    // ---- Data-quality rules found when profiling the real file ----------
+    // 1. Barclays (BCS) reports EBITDA = 1 in every year: a placeholder,
+    //    not a value. Treat |EBITDA| <= 1 on a company with real revenue as missing.
+    FixEBITDA = Table.ReplaceValue(
+        Scaled,
+        each [EBITDA],
+        each if [EBITDA] <> null and Number.Abs([EBITDA]) <= 1 and [Revenue] <> null and [Revenue] > 1000 then null else [EBITDA],
+        Replacer.ReplaceValue,
+        {"EBITDA"}
+    ),
+    // 2. Banks/insurers (AIG, BCS) report Current Ratio = 1.0 every year.
+    //    Current ratio isn't meaningful for them, so blank it out.
+    FixCurrentRatio = Table.ReplaceValue(
+        FixEBITDA,
+        each [CurrentRatio],
+        each if [Category] = "BANK" then null else [CurrentRatio],
+        Replacer.ReplaceValue,
+        {"CurrentRatio"}
+    ),
+    // 3. "Free Cash Flow per Share" doesn't reconcile to the companies' filings
+    //    (e.g. AAPL FY2022 shows 1.31 vs ~6.9 actual), so it is dropped.
+    DropFCF = Table.RemoveColumns(FixCurrentRatio, {"FCFPerShare"}, MissingField.Ignore),
+    Retyped = Table.TransformColumnTypes(DropFCF, {{"EBITDA", type nullable number}, {"CurrentRatio", type nullable number}}),
+
     // Guard against duplicate company-year rows
-    NoBlankKeys = Table.SelectRows(Scaled, each [Company] <> null and [Company] <> "" and [Year] <> null),
+    NoBlankKeys = Table.SelectRows(Retyped, each [Company] <> null and [Company] <> "" and [Year] <> null),
     Deduped = Table.Distinct(NoBlankKeys, {"Company", "Year"})
 in
     Deduped

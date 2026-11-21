@@ -1,0 +1,184 @@
+// ============================================================================
+// Financial Performance Dashboard — DAX measures
+// ----------------------------------------------------------------------------
+// HOW TO LOAD (Power BI Desktop, DAX query view):
+//   1. Home > Enter data > create an empty table named  _Measures  > Load.
+//   2. Open DAX query view, paste this whole file.
+//   3. Click "Update model: Add new measures" above DEFINE (CodeLens).
+//   4. Run the EVALUATE at the bottom to sanity-check the numbers.
+//   5. Set the format string shown in each // fmt: comment
+//      (Measure tools > Format), or use the display folders listed.
+//   6. Delete the dummy column in _Measures; it becomes a measure table.
+//
+// Units: all currency values in the source are USD millions, except
+//        Market Cap (USD billions).
+// ============================================================================
+
+DEFINE
+
+    // ---------- 1. Income statement ------------------------------------------
+    MEASURE '_Measures'[Revenue] = SUM ( FactIncomeStatement[Revenue] )                       // fmt: $#,0"M"  or  $#,0,.0"B"  (source is $M)
+    MEASURE '_Measures'[Cost of Revenue] = SUM ( FactIncomeStatement[CostOfRevenue] )
+    MEASURE '_Measures'[Gross Profit] = SUM ( FactIncomeStatement[GrossProfit] )
+    MEASURE '_Measures'[Operating Expenses] = SUM ( FactIncomeStatement[OperatingExpenses] )
+    // Source has no operating-income line; EBITDA is the operating-income measure.
+    MEASURE '_Measures'[Operating Income (EBITDA)] = SUM ( FactIncomeStatement[EBITDA] )
+    MEASURE '_Measures'[D&A, Interest & Tax] = SUM ( FactIncomeStatement[BelowEBITDA] )
+    MEASURE '_Measures'[Net Income] = SUM ( FactIncomeStatement[NetIncome] )
+    MEASURE '_Measures'[Waterfall Amount] = SUM ( FactPLWaterfall[Amount] )
+    MEASURE '_Measures'[Employees] = SUM ( FactIncomeStatement[Employees] )                   // fmt: #,0
+
+    // ---------- 2. Margins & profitability ratios ----------------------------
+    MEASURE '_Measures'[Gross Margin %] = DIVIDE ( [Gross Profit], [Revenue] )                // fmt: 0.0%
+    MEASURE '_Measures'[Operating Margin %] = DIVIDE ( [Operating Income (EBITDA)], [Revenue] )
+    MEASURE '_Measures'[Net Margin %] = DIVIDE ( [Net Income], [Revenue] )
+    MEASURE '_Measures'[Revenue per Employee ($K)] =
+        DIVIDE ( [Revenue] * 1000, [Employees] )                                               // fmt: #,0
+
+    // ---------- 3. Time intelligence (fiscal years are integers) -------------
+    MEASURE '_Measures'[Selected Year] = MAX ( DimYear[Year] )                                // fmt: 0
+
+    MEASURE '_Measures'[Revenue PY] =
+        VAR _Year = MAX ( DimYear[Year] )
+        RETURN
+            CALCULATE ( [Revenue], REMOVEFILTERS ( DimYear ), DimYear[Year] = _Year - 1 )
+
+    MEASURE '_Measures'[Revenue YoY Δ] =
+        VAR _PY = [Revenue PY]
+        RETURN
+            IF ( NOT ISBLANK ( _PY ), [Revenue] - _PY )
+
+    // Simple YoY: total vs total. Distorted when a company enters/exits the set.
+    MEASURE '_Measures'[Revenue YoY %] = DIVIDE ( [Revenue YoY Δ], [Revenue PY] )             // fmt: +0.0%;-0.0%;0.0%
+
+    // Like-for-like YoY: only companies reporting revenue in BOTH years.
+    MEASURE '_Measures'[Revenue YoY % (LFL)] =
+        VAR _Comparable =
+            FILTER (
+                VALUES ( DimCompany[Company] ),
+                NOT ISBLANK ( [Revenue] ) && NOT ISBLANK ( [Revenue PY] )
+            )
+        VAR _Cur = SUMX ( _Comparable, [Revenue] )
+        VAR _Prev = SUMX ( _Comparable, [Revenue PY] )
+        RETURN
+            DIVIDE ( _Cur - _Prev, _Prev )
+
+    MEASURE '_Measures'[Net Income PY] =
+        VAR _Year = MAX ( DimYear[Year] )
+        RETURN
+            CALCULATE ( [Net Income], REMOVEFILTERS ( DimYear ), DimYear[Year] = _Year - 1 )
+
+    MEASURE '_Measures'[Net Income YoY %] =
+        DIVIDE ( [Net Income] - [Net Income PY], ABS ( [Net Income PY] ) )
+
+    MEASURE '_Measures'[Operating Income PY] =
+        VAR _Year = MAX ( DimYear[Year] )
+        RETURN
+            CALCULATE ( [Operating Income (EBITDA)], REMOVEFILTERS ( DimYear ), DimYear[Year] = _Year - 1 )
+
+    MEASURE '_Measures'[Operating Income YoY %] =
+        DIVIDE ( [Operating Income (EBITDA)] - [Operating Income PY], ABS ( [Operating Income PY] ) )
+
+    MEASURE '_Measures'[Gross Margin % PY] =
+        VAR _Year = MAX ( DimYear[Year] )
+        RETURN
+            CALCULATE ( [Gross Margin %], REMOVEFILTERS ( DimYear ), DimYear[Year] = _Year - 1 )
+
+    MEASURE '_Measures'[Gross Margin Δ (pp)] =
+        VAR _PY = [Gross Margin % PY]
+        RETURN
+            IF ( NOT ISBLANK ( _PY ), ( [Gross Margin %] - _PY ) * 100 )                       // fmt: +0.0" pp";-0.0" pp"
+
+    // Compound annual growth across the years in the current filter context
+    MEASURE '_Measures'[Revenue CAGR %] =
+        VAR _YearsWithData = FILTER ( VALUES ( DimYear[Year] ), NOT ISBLANK ( [Revenue] ) )
+        VAR _First = MINX ( _YearsWithData, DimYear[Year] )
+        VAR _Last = MAXX ( _YearsWithData, DimYear[Year] )
+        VAR _RevFirst = CALCULATE ( [Revenue], DimYear[Year] = _First )
+        VAR _RevLast = CALCULATE ( [Revenue], DimYear[Year] = _Last )
+        VAR _N = _Last - _First
+        RETURN
+            IF ( _N > 0 && _RevFirst > 0 && _RevLast > 0, ( _RevLast / _RevFirst ) ^ ( 1 / _N ) - 1 )
+
+    // ---------- 4. Balance sheet (semi-additive: year-end balances) ----------
+    // LASTNONBLANKVALUE picks the latest year in context, so totals across
+    // years show the closing balance instead of an invalid sum.
+    MEASURE '_Measures'[Shareholder Equity] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[ShareholderEquity] ) )
+    MEASURE '_Measures'[Total Debt (est.)] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[TotalDebtEst] ) )
+    MEASURE '_Measures'[Total Assets (est.)] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[TotalAssetsEst] ) )
+    MEASURE '_Measures'[Other Liabilities (est.)] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[OtherLiabilitiesEst] ) )
+    MEASURE '_Measures'[Total Liabilities (est.)] =
+        [Total Assets (est.)] - [Shareholder Equity]
+    MEASURE '_Measures'[Market Cap ($B)] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactBalanceSheet[MarketCapB] ) )             // fmt: $#,0.0"B"
+
+    // ---------- 5. Liquidity, leverage & return ratios -----------------------
+    // Current ratio is published as a ratio only (no current assets/liabilities),
+    // so multi-company values are a simple average. Exact for one company-year.
+    MEASURE '_Measures'[Current Ratio] =
+        LASTNONBLANKVALUE ( DimYear[Year], AVERAGE ( FactBalanceSheet[CurrentRatio] ) )       // fmt: 0.00"x"
+
+    MEASURE '_Measures'[Current Ratio Status] =
+        VAR _CR = [Current Ratio]
+        RETURN
+            SWITCH ( TRUE (), ISBLANK ( _CR ), BLANK (), _CR < 1, "Below 1.0x", _CR < 1.5, "1.0–1.5x", "Healthy (≥1.5x)" )
+
+    // Weighted D/E = total debt / total equity (not an average of ratios)
+    MEASURE '_Measures'[Debt to Equity] = DIVIDE ( [Total Debt (est.)], [Shareholder Equity] ) // fmt: 0.00"x"
+
+    MEASURE '_Measures'[Net Income (closing year)] =
+        LASTNONBLANKVALUE ( DimYear[Year], SUM ( FactIncomeStatement[NetIncome] ) )
+    MEASURE '_Measures'[ROE %] = DIVIDE ( [Net Income (closing year)], [Shareholder Equity] )  // fmt: 0.0%
+    MEASURE '_Measures'[ROA % (est.)] = DIVIDE ( [Net Income (closing year)], [Total Assets (est.)] )
+
+    // ---------- 6. Cash flow --------------------------------------------------
+    MEASURE '_Measures'[Operating Cash Flow] = SUM ( FactCashFlow[CFO] )
+    MEASURE '_Measures'[Investing Cash Flow] = SUM ( FactCashFlow[CFI] )
+    MEASURE '_Measures'[Financing Cash Flow] = SUM ( FactCashFlow[CFF] )
+    MEASURE '_Measures'[Net Cash Flow] = SUM ( FactCashFlow[NetCashFlow] )
+    MEASURE '_Measures'[Free Cash Flow (est.)] = SUM ( FactCashFlow[FreeCashFlowEst] )
+    MEASURE '_Measures'[Cash Conversion] = DIVIDE ( [Operating Cash Flow], [Net Income] )      // fmt: 0.00"x"
+
+    // ---------- 7. Report helpers (titles, labels, formatting) ---------------
+    MEASURE '_Measures'[Selection Label] =
+        VAR _Co =
+            IF (
+                HASONEVALUE ( DimCompany[Company Name] ),
+                VALUES ( DimCompany[Company Name] ),
+                IF ( HASONEVALUE ( DimCompany[Category] ), VALUES ( DimCompany[Category] ) & " companies", "All companies" )
+            )
+        RETURN
+            _Co & " · FY" & [Selected Year]
+
+    MEASURE '_Measures'[Title P&L Bridge] = "Revenue to Net Income — " & [Selection Label]
+    MEASURE '_Measures'[Title Balance Sheet] = "Year-end balance sheet & ratios — FY" & [Selected Year]
+
+    // Conditional-formatting colour for YoY KPIs (use as Field value)
+    MEASURE '_Measures'[CF YoY Colour] =
+        VAR _V = [Revenue YoY %]
+        RETURN
+            SWITCH ( TRUE (), ISBLANK ( _V ), "#8A8F98", _V >= 0, "#1B7F5B", "#C2413A" )
+
+    MEASURE '_Measures'[CF Current Ratio Colour] =
+        VAR _CR = [Current Ratio]
+        RETURN
+            SWITCH ( TRUE (), ISBLANK ( _CR ), BLANK (), _CR < 1, "#C2413A", _CR < 1.5, "#C98A1B", "#1B7F5B" )
+
+// ---------- Sanity check ------------------------------------------------------
+EVALUATE
+SUMMARIZECOLUMNS (
+    DimYear[Year],
+    "Revenue", [Revenue],
+    "Gross Margin %", [Gross Margin %],
+    "Operating Income (EBITDA)", [Operating Income (EBITDA)],
+    "Net Income", [Net Income],
+    "Revenue YoY %", [Revenue YoY %],
+    "Revenue YoY % (LFL)", [Revenue YoY % (LFL)],
+    "Current Ratio", [Current Ratio],
+    "Debt to Equity", [Debt to Equity]
+)
+ORDER BY DimYear[Year]

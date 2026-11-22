@@ -32,11 +32,10 @@ A Power BI model that takes the raw financial statements file, shapes it automat
 | # | Page | What it shows |
 |---|---|---|
 | 1 | **P&L Overview** | KPI cards (Revenue, Gross Margin, Operating Income, Net Income, like-for-like growth) and a **waterfall** bridging Revenue → Net Income |
-| 2 | **Trends** | **Combo chart** of revenue & operating income (columns) vs net margin (line); simple vs like-for-like YoY growth; cash flow by activity; gross-margin small multiples |
-| 3 | **Balance Sheet & Ratios** | Matrix by Sector → Company with equity, debt, assets, **current ratio** (RAG-colored), D/E, ROE; leverage-vs-return scatter |
-| ↳ | **Company Detail** *(drill-through)* | Full statement view (line items × years), company waterfall, liquidity trend |
+| 2 | **Trends** | **Combo chart** of revenue & operating income (columns) vs net margin (line); simple vs like-for-like YoY growth; cash flow by activity; gross-margin small multiples by sector (FY2023 excluded as a partial year) |
+| 3 | **Balance Sheet & Ratios** | Matrix by Sector → Company with equity, debt, assets, **current ratio** (RAG-colored), D/E, ROE; leverage-vs-return scatter; funding-structure bars |
+| ↳ | **Company Detail** *(drill-through)* | Right-click any company → full statement view (line items × years) plus current ratio and D/E trend |
 
-<!-- Add screenshots after building: docs/screenshots/01-pl-overview.png etc. -->
 | P&L Overview | Trends |
 |---|---|
 | ![P&L Overview](docs/screenshots/01-pl-overview.png) | ![Trends](docs/screenshots/02-trends.png) |
